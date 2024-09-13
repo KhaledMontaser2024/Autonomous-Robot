@@ -9,14 +9,14 @@
 ////////////////////////// Ultrasonic /////////////////////////////////
 #define SET_DISTANCE 5     // Threshold distance for obstacle detection
 
-#define US_F_echo A1        // Front ultrasonic sensor echo pin
-#define US_F_trigger 2      // Front ultrasonic sensor trigger pin
+#define US_F_echo 5        // Front ultrasonic sensor echo pin
+#define US_F_trigger 6     // Front ultrasonic sensor trigger pin
 
-#define US_R_echo A2        // Right ultrasonic sensor echo pin
-#define US_R_trigger 3      // Right ultrasonic sensor trigger pin
+#define US_R_echo 3        // Right ultrasonic sensor echo pin
+#define US_R_trigger 4     // Right ultrasonic sensor trigger pin
 
-#define US_L_echo A3        // Left ultrasonic sensor echo pin
-#define US_L_trigger 4      // Left ultrasonic sensor trigger pin
+#define US_L_echo 2        // Left ultrasonic sensor echo pin
+#define US_L_trigger 1     // Left ultrasonic sensor trigger pin
 ///////////////////////////////////////////////////////////////////////
 
 //////////////////// For Motors and Motion ////////////////////////////
@@ -24,7 +24,7 @@
 #define R_M_DirectionPin 8  // Right Motor Direction pin
 
 #define L_M_SpeedPin 10     // Left Motor PWM pin
-#define L_M_DirectionPin 11 // Left Motor Direction pin
+#define L_M_DirectionPin 7 // Left Motor Direction pin
 
 #define MaxSpeed 160
 #define StartSpeed 50 
@@ -38,8 +38,11 @@
 ////////////////////////////////////////////////////////////////////////
 
 
-long Ultrasonic_read(int trigger, int echo);
 void check_Ultrasonics();
+void Trigger_UltraSonic();
+void US_R_ISR();
+void US_L_ISR();
+
 
 void Accelerate(int TargetSpeed = MaxSpeed , int TargetMotor = AllMotors);
 void Decelerate(int TargetSpeed = StartSpeed, int TargetMotor = AllMotors);
@@ -54,14 +57,17 @@ unsigned int speed = StartSpeed;
 unsigned long int TimeStamp =0;
 char lastDirection = 'S';
 
-int distance_L, distance_F, distance_R;
 
+int R_duration, R_distance , L_duration, L_distance , F_duration, F_distance;
+long int US_R_time=0;
+long int US_L_time=0;
 
 void setup() 
 {
   Serial.begin(9600); // Start serial communication
   TimeStamp = millis();
   // Setup pins
+
   pinMode(R_M_SpeedPin,OUTPUT);
   pinMode(L_M_SpeedPin,OUTPUT);
   pinMode(R_M_DirectionPin,OUTPUT);
@@ -77,38 +83,32 @@ void setup()
   pinMode(R_IR, INPUT);
   pinMode(F_IR, INPUT);
 
-  //Initial ultrasonic readings
-  distance_F = Ultrasonic_read(US_F_trigger, US_F_echo);
-  distance_R = Ultrasonic_read(US_R_trigger, US_R_echo);
-  distance_L = Ultrasonic_read(US_L_trigger, US_L_echo);
-
-  delay(500); 
+  
+  attachInterrupt(0,US_L_ISR,CHANGE);
+  attachInterrupt(1,US_R_ISR,CHANGE);
+  
 }
-
+//////////////////////////////////////////////////////////////////////////////////////////
 void loop() 
 {
 
   check_Ultrasonics();
-  // Line following logic
+
   if ( digitalRead(R_IR) == LOW && digitalRead(F_IR) == HIGH && digitalRead(L_IR) == LOW ) 
   {
-    lastDirection = 'F';
     forward();
   } 
   else if (( digitalRead(R_IR) == HIGH && digitalRead(F_IR) == LOW && digitalRead(L_IR) == LOW ) || (digitalRead(R_IR) == HIGH && digitalRead(F_IR) == HIGH && digitalRead(L_IR) == LOW) )
   {
-    lastDirection = 'R';
     RotateRight();
   } 
   else if ((digitalRead(R_IR) == LOW && digitalRead(F_IR) == LOW && digitalRead(L_IR) == HIGH) || (digitalRead(R_IR) == LOW && digitalRead(F_IR) == HIGH && digitalRead(L_IR) == HIGH)) 
   {
-    lastDirection = 'L';
     RotateLeft();
   } 
   else if (digitalRead(R_IR) == HIGH &&  digitalRead(F_IR) == HIGH && digitalRead(L_IR) == HIGH) 
   {
     Serial.println("Zone Changed");
-    lastDirection = 'F';
     forward();
   }
   else if (digitalRead(R_IR) == LOW &&  digitalRead(F_IR) == LOW && digitalRead(L_IR) == LOW) 
@@ -118,12 +118,10 @@ void loop()
     {
       case 'R':
         RotateLeft();
-        delay(1000);
       break;
 
       case 'L':
         RotateRight();
-        delay(1000);
       break;
 
       case 'F':
@@ -131,55 +129,11 @@ void loop()
       break;
 
       default:
+        forward();
       break;
     }
 
   }
-  delay(10);
-}
-
-void check_Ultrasonics()
-{
-  distance_F = Ultrasonic_read(US_F_trigger, US_F_echo);
-  distance_R = Ultrasonic_read(US_R_trigger, US_R_echo);
-  distance_L = Ultrasonic_read(US_L_trigger, US_L_echo);
-  delay(500);
-
-  if (distance_F <= SET_DISTANCE && distance_R >= SET_DISTANCE && distance_L >= SET_DISTANCE)   // obstacle in front  
-  {
-    Decelerate();
-    backward();
-    delay(1000);
-    Decelerate();
-
-  }
-  else if (distance_F >= SET_DISTANCE && distance_R <= SET_DISTANCE && distance_L >= SET_DISTANCE) // obstacle on the right  
-  {
-    Decelerate();
-    RotateLeft();
-    delay(1000);
-    Decelerate();
-  }
-  else if (distance_F >= SET_DISTANCE && distance_R >= SET_DISTANCE && distance_L <= SET_DISTANCE) // obstacle on the Left 
-  {
-    
-    Decelerate();
-    RotateRight();
-    delay(1000);
-    Decelerate();
-  }
-
- return;
-}
-
-long Ultrasonic_read(int trigger, int echo) 
-{
-  digitalWrite(trigger, LOW);
-  delayMicroseconds(2);
-  digitalWrite(trigger, HIGH);
-  delayMicroseconds(10);
-  long time = pulseIn(echo, HIGH);
-  return time / 29 / 2;
 }
 
 
@@ -322,6 +276,18 @@ void forward()
       // Serial.println("Already going Forward!"); //debug
     break;
     
+    case 'r':
+      Decelerate(MaxSpeed ,RightMotor);
+      // Serial.println("Already going Forward!"); //debug
+      speed == MaxSpeed ? lastDirection = 'F' : lastDirection = 'r';
+    break;
+    
+    case 'l':
+      Decelerate(MaxSpeed ,LeftMotor);
+      // Serial.println("Already going Forward!"); //debug
+      speed == MaxSpeed ? lastDirection = 'F' : lastDirection = 'l';
+    break;
+    
     case 'S':
       digitalWrite(R_M_DirectionPin, HIGH);
       digitalWrite(L_M_DirectionPin, LOW);
@@ -437,4 +403,90 @@ void RotateLeft()
   }
   
   return;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+void check_Ultrasonics()
+{
+  Trigger_UltraSonic();
+  
+  if (F_distance <= SET_DISTANCE && R_distance >= SET_DISTANCE && L_distance >= SET_DISTANCE)   // obstacle in front  
+  {
+    backward();
+  }
+  else if (F_distance >= SET_DISTANCE && R_distance <= SET_DISTANCE && L_distance >= SET_DISTANCE) // obstacle on the right  
+  {
+    SteerLeft();
+  }
+  else if (F_distance >= SET_DISTANCE && R_distance >= SET_DISTANCE && L_distance <= SET_DISTANCE) // obstacle on the Left 
+  {
+    SteerRight();
+  }
+
+ return;
+}
+
+void Trigger_UltraSonic()
+{
+  digitalWrite(US_R_trigger, LOW);
+  digitalWrite(US_F_trigger, LOW);
+  digitalWrite(US_L_trigger, LOW);
+  delayMicroseconds(2);
+  
+  digitalWrite(US_R_trigger, HIGH);
+  digitalWrite(US_F_trigger, HIGH);
+  digitalWrite(US_L_trigger, HIGH);
+  delayMicroseconds(10);
+  
+  digitalWrite(US_R_trigger, LOW);
+  digitalWrite(US_F_trigger, LOW);
+  digitalWrite(US_L_trigger, LOW);
+  
+  
+  F_duration = pulseIn(US_F_echo, HIGH);
+  F_distance = (F_duration/29)/2;
+ 
+}
+
+
+void US_R_ISR()
+{
+  static bool state = false;
+  switch (state)
+  {
+  	case false:
+    	US_R_time = micros();
+    	state = true;
+    break;
+    
+    case true:
+    	R_duration = (micros()-US_R_time);
+    	R_distance = (R_duration/27.5)/2;
+    	state = false;
+    break;
+  	default:
+    break;
+  }
+  
+}
+void US_L_ISR()
+{
+  static bool state = false;
+  switch (state)
+  {
+  	case false:
+    	US_L_time = micros();
+    	state = true;
+    break;
+    
+    case true:
+    	L_duration = (micros()-US_L_time);
+    	L_distance = (L_duration/27.5)/2;
+    	state = false;
+    break;
+  	default:
+    break;
+  }
+  
 }
